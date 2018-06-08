@@ -80,7 +80,68 @@ VehicleCommand QuadControl::GenerateMotorCommands(float collThrustCmd, V3F momen
 	cmd.desiredThrustsN[1] = Fc_blade - dF_Mx_blade + dF_My_blade + dF_Mz_blade; // front right
 	cmd.desiredThrustsN[2] = Fc_blade + dF_Mx_blade - dF_My_blade + dF_Mz_blade; // rear left
 	cmd.desiredThrustsN[3] = Fc_blade - dF_Mx_blade - dF_My_blade - dF_Mz_blade; // rear right
-  
+
+	// Find min/max delta motor thrusts
+	float minF = cmd.desiredThrustsN[0];
+	float maxF = cmd.desiredThrustsN[0];
+	for (uint8_t k = 1; k < 4; k++)
+	{
+		if (cmd.desiredThrustsN[k] < minF)
+			minF = cmd.desiredThrustsN[k];
+		else if (maxF < cmd.desiredThrustsN[k])
+			maxF = cmd.desiredThrustsN[k];
+	}
+
+	// Check unconstrained solution
+	if (minF < minMotorThrust || maxMotorThrust < maxF)
+	{
+		// limit overall force to allow some torque is avialable for generating moments
+		float reserve = 0.4;
+		float allowedMinFc = minMotorThrust + max(0.0f, min(Fc_blade - minF, reserve * (maxMotorThrust - minMotorThrust)));
+		float allowedMaxFc = maxMotorThrust - max(0.0f, min(maxF - Fc_blade, reserve * (maxMotorThrust - minMotorThrust)));
+
+		if ((Fc_blade < allowedMinFc) || (allowedMaxFc < Fc_blade))
+		{
+			Fc_blade = max(allowedMinFc, min(Fc_blade, allowedMaxFc));
+
+			// Recalculate commands
+			cmd.desiredThrustsN[0] = Fc_blade + dF_Mx_blade + dF_My_blade - dF_Mz_blade; // front left
+			cmd.desiredThrustsN[1] = Fc_blade - dF_Mx_blade + dF_My_blade + dF_Mz_blade; // front right
+			cmd.desiredThrustsN[2] = Fc_blade + dF_Mx_blade - dF_My_blade + dF_Mz_blade; // rear left
+			cmd.desiredThrustsN[3] = Fc_blade - dF_Mx_blade - dF_My_blade - dF_Mz_blade; // rear right
+
+			// Recalculate min/max delta motor thrusts
+			minF = cmd.desiredThrustsN[0];
+			float maxF = cmd.desiredThrustsN[0];
+			for (uint8_t k = 1; k < 4; k++)
+			{
+				if (cmd.desiredThrustsN[k] < minF)
+					minF = cmd.desiredThrustsN[k];
+				else if (maxF < cmd.desiredThrustsN[k])
+					maxF = cmd.desiredThrustsN[k];
+			}
+		}
+
+		// if needed scale all the moments to avoid violating min/max blade forces
+		float momentScaling = 1.0;
+		for (uint8_t k = 0; k < 4; k++)
+		{
+			if (cmd.desiredThrustsN[k] < minF)
+				momentScaling = min(momentScaling, (Fc_blade - minF) / (Fc_blade - cmd.desiredThrustsN[k]));
+			else if (maxF < cmd.desiredThrustsN[k])
+				momentScaling = min(momentScaling, (maxF - Fc_blade) / (cmd.desiredThrustsN[k] - Fc_blade));
+		}
+
+		if (momentScaling < 1.0)
+		{
+			// Recalculate commands with force
+			cmd.desiredThrustsN[0] = Fc_blade + momentScaling * (dF_Mx_blade + dF_My_blade - dF_Mz_blade); // front left
+			cmd.desiredThrustsN[1] = Fc_blade + momentScaling * (-dF_Mx_blade + dF_My_blade + dF_Mz_blade); // front right
+			cmd.desiredThrustsN[2] = Fc_blade + momentScaling * (dF_Mx_blade - dF_My_blade + dF_Mz_blade); // rear left
+			cmd.desiredThrustsN[3] = Fc_blade + momentScaling * (-dF_Mx_blade - dF_My_blade - dF_Mz_blade); // rear right
+		}
+	}
+
 	/////////////////////////////// END STUDENT CODE ////////////////////////////
 
 	return cmd;
